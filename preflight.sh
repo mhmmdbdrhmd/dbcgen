@@ -38,7 +38,9 @@ KEYFILES=$(git ls-files | grep -iE '(^|/)(\.env($|\.)|id_rsa|id_ed25519|.*\.pem$
 $(echo "$KEYFILES" | sed 's/^/         /')" || ok "no credential-shaped filenames tracked"
 
 # By content, not by name — catches a private key called anything at all.
-KEYBLOBS=$(git grep -lIE 'BEGIN (RSA|OPENSSH|DSA|EC|PGP) PRIVATE KEY|BEGIN CERTIFICATE' -- . 2>/dev/null || true)
+# ':!preflight.sh' excludes this script, which contains the very patterns it
+# searches for and would otherwise report itself once it is committed.
+KEYBLOBS=$(git grep -lIE 'BEGIN (RSA|OPENSSH|DSA|EC|PGP) PRIVATE KEY|BEGIN CERTIFICATE' -- . ':!preflight.sh' 2>/dev/null || true)
 [ -n "$KEYBLOBS" ] && hit "private key / certificate material in tracked files:
 $(echo "$KEYBLOBS" | sed 's/^/         /')" || ok "no key material by content"
 

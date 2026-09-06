@@ -1,10 +1,11 @@
 """Provenance.
 
 Every message, signal and value table this tool emits carries an `Evidence`
-record saying where it came from.  There are only two legitimate origins -- a
-row in the published standard, or a counted statistic over the recording -- and
-the distinction is preserved all the way into the DBC comments and the report,
-so a reader can tell an ISO-defined fact from a guess made about their bus.
+record saying where it came from.  A fact from a published standard, a fact
+from an openly-licensed database somebody reverse-engineered, and a guess made
+from counting bytes on one bus are three different kinds of claim, and the
+distinction is preserved all the way into the DBC comments and the report so a
+reader can tell them apart without having met this tool.
 """
 
 from __future__ import annotations
@@ -20,6 +21,11 @@ INFERRED = "inferred"
 PROPOSED = "proposed"
 #: A J1939 encoding convention applied because the standard names the SLOT.
 CONVENTION = "convention"
+#: From an openly-licensed public database maintained by reverse engineering
+#: rather than by the body that publishes the protocol -- canboat's NMEA 2000
+#: definitions, opendbc's vehicle maps.  Far better than a guess, and not the
+#: same thing as the standard saying so.
+COMMUNITY = "community"
 
 AUTHORITATIVE = "authoritative"
 HIGH = "high"
@@ -40,7 +46,7 @@ class Evidence:
     stats: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.origin not in (STANDARD, INFERRED, PROPOSED, CONVENTION):
+        if self.origin not in (STANDARD, INFERRED, PROPOSED, CONVENTION, COMMUNITY):
             raise ValueError(f"unknown origin {self.origin!r}")
         if self.confidence not in _CONFIDENCE_ORDER:
             raise ValueError(f"unknown confidence {self.confidence!r}")
@@ -78,6 +84,11 @@ def proposed(rule: str, detail: str, **stats: Any) -> Evidence:
 
 def by_convention(rule: str, detail: str, **stats: Any) -> Evidence:
     return Evidence(CONVENTION, rule, detail, MEDIUM, stats)
+
+
+def from_community(rule: str, detail: str, confidence: str = HIGH, **stats: Any) -> Evidence:
+    """A definition from a public, openly-licensed, community-maintained database."""
+    return Evidence(COMMUNITY, rule, detail, confidence, stats)
 
 
 def best(items: List[Evidence]) -> Evidence:

@@ -14,6 +14,8 @@ from .j1939.ids import decompose, pgn_name_hint
 from .sources import open_recording
 from .standard import fetch as standard_fetch
 from .standard import isobus, tables as identity_tables
+from .standard import overlay as overlay_mod
+from .standard import registry
 
 
 def _classify(st: MessageStats) -> str:
@@ -157,7 +159,63 @@ def _parse_pgns(values) -> list:
     return out
 
 
+def cmd_sources(args: argparse.Namespace) -> int:
+    """List the standards that can be built without the user finding anything."""
+    if args.list:
+        source = registry.get(args.list)
+        if source.name != "opendbc":
+            print(f"{source.name} has no variants to list", file=sys.stderr)
+            return 2
+        from .standard import opendbc
+
+        rows = opendbc.platforms(refresh=args.refresh)
+        print(f"{len(rows)} platform(s) in opendbc:\n")
+        for name, size in rows:
+            print(f"  opendbc:{name:<44} {size / 1024:7.0f} KB")
+        print("\nEach describes particular vehicles, not a protocol.")
+        return 0
+
+    print("Standards dbcgen can build from. Nothing here is stored in this")
+    print("repository -- each is fetched once and cached, or encoded from public")
+    print("definitions, so licensed material is never redistributed.\n")
+    for source in registry.SOURCES:
+        cached = "" if source.needs_network else "  (no download needed)"
+        print(f"  {source.label}")
+        print(f"      {source.title}  --  signals marked '{source.origin}'{cached}")
+        for line in _wrap(source.summary, 68):
+            print(f"      {line}")
+        print(f"      licence: {source.licence}")
+        print()
+    print("Use one with:   dbcgen generate --source <name> -o out.dbc")
+    print("Your own file:  dbcgen generate --standard-file mine.dbc rec.csv -o out.dbc")
+    return 0
+
+
+def _wrap(text: str, width: int):
+    words, line, out = text.split(), "", []
+    for w in words:
+        if len(line) + len(w) + 1 > width:
+            out.append(line)
+            line = w
+        else:
+            line = f"{line} {w}".strip()
+    if line:
+        out.append(line)
+    return out
+
+
 def cmd_generate(args: argparse.Namespace) -> int:
+    if args.source and registry.get(args.source).name != registry.DEFAULT:
+        if args.recording is not None:
+            print(
+                f"--source {args.source} builds from that database alone; it does "
+                f"not read a recording. Drop the recording, or use --source isobus "
+                f"(the default), which does.",
+                file=sys.stderr,
+            )
+            return 2
+        return _generate_from_source(args)
+
     if args.recording is None:
         return _generate_standard_only(args)
 
@@ -170,11 +228,24 @@ def cmd_generate(args: argparse.Namespace) -> int:
     std = isobus.load(info)
     tbl = identity_tables.load(info)
 
-    db, report, nodes = generate(fs, std, tbl, meta=meta, version=args.version)
+    overlay = overlay_mod.load(args.standard_file) if args.standard_file else None
+    if overlay is not None:
+        print(f"overlay: {len(overlay)} message(s) from {args.standard_file}")
+
+    db, report, nodes = generate(
+        fs, std, tbl, meta=meta, version=args.version, overlay=overlay
+    )
     dbc_writer.dump(db, args.output)
 
     print(f"wrote {args.output}")
     print(f"  messages          : {report.messages}")
+    if report.from_overlay:
+        print(f"    your database   : {report.from_overlay}")
+        if report.overlay_signals_dropped:
+            print(
+                f"      WARNING       : {report.overlay_signals_dropped} signal(s) "
+                f"from your database did not fit the frames actually recorded"
+            )
     print(f"    network layer   : {report.from_network_layer}")
     print(f"    standard layout : {report.from_standard_layout}")
     print(f"    named only      : {report.named_only}")
@@ -189,6 +260,58 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
     if args.verify:
         return _verify(args.output, fs)
+    return 0
+
+
+def _reload_count(path: str):
+    """How many messages the written file parses back to, or None if cantools
+    is not installed."""
+    try:
+        import cantools
+    except ImportError:
+        return None
+    return len(cantools.database.load_file(path).messages)
+
+
+def _generate_from_source(args: argparse.Namespace) -> int:
+    """Build from one of the catalogued databases that is not the ISOBUS export."""
+    source = registry.get(args.source)
+    try:
+        db = registry.build(args.source, refresh=args.refresh_standard)
+    except KeyError as exc:
+        print(str(exc).strip("'\""), file=sys.stderr)
+        return 2
+
+    if not db.messages:
+        print(f"{args.source} produced no messages", file=sys.stderr)
+        return 2
+
+    dbc_writer.dump(db, args.output)
+    signals = sum(len(m.signals) for m in db.messages)
+
+    # A database that cannot be read back is not a database.  The recording
+    # path has always reloaded its own output; a catalogued source is exactly
+    # as capable of emitting something malformed, and more likely to, because
+    # its input is somebody else's file in somebody else's format.
+    reloaded = _reload_count(args.output)
+    if reloaded is not None and reloaded != len(db.messages):
+        print(
+            f"wrote {args.output}, but it reloads as {reloaded} of "
+            f"{len(db.messages)} messages",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"wrote {args.output}  (from {source.title}, no recording read)")
+    print(f"  messages          : {len(db.messages)}")
+    print(f"  signals           : {signals}, all marked '{source.origin}'")
+    print(f"  licence           : {source.licence}")
+    print(f"  attribution       : {source.attribution}")
+    if source.origin == "community":
+        print()
+        print("These definitions were reconstructed by other people, not published")
+        print("by whoever owns the protocol. Check anything that matters against")
+        print("the machine in front of you.")
     return 0
 
 
@@ -215,6 +338,13 @@ def _generate_standard_only(args: argparse.Namespace) -> int:
     dbc_writer.dump(db, args.output)
     print(f"wrote {args.output}  (no recording read)")
     print(f"  messages          : {report.messages}")
+    if report.from_overlay:
+        print(f"    your database   : {report.from_overlay}")
+        if report.overlay_signals_dropped:
+            print(
+                f"      WARNING       : {report.overlay_signals_dropped} signal(s) "
+                f"from your database did not fit the frames actually recorded"
+            )
     print(f"    network layer   : {report.from_network_layer}")
     print(f"    standard layout : {report.from_standard_layout}")
     print(f"  signals           : {report.signals_standard}, all from the standard")
@@ -298,6 +428,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fetch.set_defaults(func=cmd_fetch_standard)
 
+    src = sub.add_parser(
+        "sources",
+        help="list the standards dbcgen can build from",
+        description="Every standard available without you having to find one. "
+        "None is stored in this repository: each is fetched once and cached, or "
+        "encoded from public definitions.",
+    )
+    src.add_argument(
+        "--list",
+        metavar="SOURCE",
+        help="list the variants of a source that has them (currently: opendbc)",
+    )
+    src.add_argument(
+        "--refresh", action="store_true", help="re-download the variant index"
+    )
+    src.set_defaults(func=cmd_sources)
+
     gen = sub.add_parser(
         "generate",
         help="generate a DBC from the standard, and from a recording if given",
@@ -315,6 +462,21 @@ def build_parser() -> argparse.ArgumentParser:
         "archive.zip::member. Omit to build from the standard alone.",
     )
     gen.add_argument("-o", "--output", required=True, help="path to write the .dbc to")
+    gen.add_argument(
+        "--source",
+        default=registry.DEFAULT,
+        metavar="NAME",
+        help="which standard to build from: "
+        + ", ".join(x.label for x in registry.SOURCES)
+        + f" (default {registry.DEFAULT}). Run 'dbcgen sources' for what each is.",
+    )
+    gen.add_argument(
+        "--standard-file",
+        metavar="PATH",
+        help="a DBC you already own -- a licensed Digital Annex converted to DBC, "
+        "or any database you trust -- used as the authoritative layer ahead of "
+        "inference. Read where it lies; never copied, cached or committed.",
+    )
     gen.add_argument(
         "--pgn",
         action="append",
@@ -347,7 +509,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except KeyError as exc:
+        # Raised by the source registry for a name it does not know, and by
+        # opendbc when a platform was not chosen.  Both are user errors with
+        # something useful to say, so they are worth a line rather than a stack.
+        print(str(exc).strip("'\""), file=sys.stderr)
+        return 2
+    except standard_fetch.StandardDataError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except (FileNotFoundError, IsADirectoryError) as exc:
+        print(f"cannot read {exc.filename}: {exc.strerror}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

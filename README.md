@@ -6,7 +6,7 @@
 <img alt="Python" src="https://img.shields.io/badge/Python-3.10%20%E2%86%92%203.13-3776AB?style=flat-square&logo=python&logoColor=white">
 <img alt="standards" src="https://img.shields.io/badge/standards-ISO%2011783%20%2B%20J1939-2DD4BF?style=flat-square">
 <img alt="output" src="https://img.shields.io/badge/output-Vector%20DBC-6E40C9?style=flat-square">
-<img alt="tests count" src="https://img.shields.io/badge/tests-128%20passing-3FB950?style=flat-square">
+<img alt="tests count" src="https://img.shields.io/badge/tests-153%20passing-3FB950?style=flat-square">
 <img alt="license" src="https://img.shields.io/badge/license-MIT-3FB950?style=flat-square">
 </p>
 
@@ -34,7 +34,7 @@
 - [1. What it does](#1-what-it-does)
 - [2. Quick start](#2-quick-start)
 - [3. The workflow](#3-the-workflow)
-- [4. Where the standard comes from](#4-where-the-standard-comes-from)
+- [4. Which standards you can build from](#4-which-standards-you-can-build-from)
 - [5. How it reads a payload](#5-how-it-reads-a-payload)
 - [6. What the names mean](#6-what-the-names-mean)
 - [7. Results](#7-results)
@@ -150,7 +150,7 @@ dbcgen fetch-standard
 One public file, downloaded once and cached in `~/.cache/dbcgen/`, pinned by
 sha256 so a later run can prove it used the same revision. No account, no
 licence, no vendored copy in the repository. Every run after the first is
-offline. → [§4](#4-where-the-standard-comes-from)
+offline. → [§4](#4-which-standards-you-can-build-from)
 
 ### 3.2 Stage 2 — record the bus (optional)
 
@@ -246,7 +246,58 @@ first time.
 
 ---
 
-## 4. Where the standard comes from
+## 4. Which standards you can build from
+
+```bash
+dbcgen sources                       # the menu
+dbcgen generate --source obd2      -o obd.dbc
+dbcgen generate --source nmea2000  -o boat.dbc
+```
+
+| `--source` | covers | signals marked | licence |
+|---|---|---|---|
+| `isobus` *(default)* | J1939 / ISO 11783 — agriculture, heavy duty | `standard` | fetched at run time, never redistributed |
+| `nmea2000` | marine — navigation, engines, tanks, AC systems | `community` | Apache-2.0, [canboat](https://github.com/canboat/canboat) |
+| `obd2` | the connector under every car's dashboard | `standard` | SAE J1979 formulas, published everywhere |
+| `opendbc:<platform>` | 57 production vehicle platforms | `community` | MIT, [opendbc](https://github.com/commaai/opendbc) |
+
+**Nothing in that table is stored in this repository.** Each database is fetched
+once and cached under `~/.cache/dbcgen/`, or — for OBD-II — encoded from
+published formulas and available offline from the first run. That is partly
+hygiene, since a fetched copy stays current and a vendored one rots, and partly
+the law: the ISOBUS registry states no terms of use at all, and silence is not
+a licence.
+
+> [!IMPORTANT]
+> **`community` is not `standard`, and the file says which.** canboat and
+> opendbc are openly-licensed databases *reconstructed by other people* —
+> canboat from watching marine traffic, opendbc by driving cars and reading the
+> bus. That is far better evidence than counting bit flips on one recording,
+> and it is not the body that defines the protocol stating a fact. opendbc in
+> particular describes **particular vehicles**, not a protocol: a manufacturer
+> may change a layout between model years without telling anyone.
+
+### 4.1 Using a manual you own
+
+Most of SAE J1939 is sold, not published. If you hold the Digital Annex, or a
+commercial DBC built from it, that file outranks everything this tool would
+otherwise guess:
+
+```bash
+dbcgen generate recording.csv --standard-file ~/private/j1939da.dbc -o bus.dbc
+```
+
+It is read where it lies — never copied into the cache, never written beside
+the output, never committed. Matching is by full identifier first and parameter
+group second, so a database written for source address `0x00` still resolves an
+ECU that claimed `0x17`. Anything in it that does not fit the frames you
+actually recorded is reported, not dropped in silence.
+
+Only `.dbc` is accepted. A Digital Annex arrives as a spreadsheet whose column
+layout is licensed material and varies by revision; reading it by guesswork
+would misplace signals silently, so convert it first.
+
+### 4.2 The ISOBUS export in detail
 
 One public file, fetched and cached — never vendored, so a generated database
 can state which dated revision produced it.
@@ -339,6 +390,11 @@ comments — which a `CM_` comment does not.
 | `Const_40_8` | these bits never changed during the recording — a fact about the recording, not proof they are constant. |
 | `Raw_Byte3` | no structure inferred; the byte is passed through so nothing is silently dropped. |
 
+Signals from `--source nmea2000` or `--source opendbc:…` keep their upstream
+names but are marked `community` in the `SignalSource` attribute, and every
+generated file states in its header which database they came from and that it
+was reconstructed rather than published.
+
 Every signal also carries a `CM_` comment with the statistic behind it, and a
 `SignalSource` attribute (`standard` / `convention` / `inferred` / `proposed`) so
 a tool can filter on provenance without parsing text. Every generated file opens
@@ -414,6 +470,14 @@ Download and cache the public ISOBUS/J1939 export, then print its coverage
 split. Run once; every later command is offline unless `--refresh` is given.
 
 ```
+dbcgen sources [--list SOURCE] [--refresh]
+```
+
+List every standard that can be built without you finding a manual, with its
+licence, its attribution, and the provenance its signals carry.
+`--list opendbc` enumerates the 57 vehicle platforms.
+
+```
 dbcgen inspect <recording> [--json]
 ```
 
@@ -433,6 +497,8 @@ build from the standard alone.
 
 | flag | effect |
 |---|---|
+| `--source NAME` | which catalogued standard to build from — `isobus` (default), `nmea2000`, `obd2`, `opendbc:<platform>`. Everything but `isobus` builds from that database alone and reads no recording. |
+| `--standard-file PATH` | a `.dbc` you already own, used as the authoritative layer ahead of inference. Read where it lies; never copied, cached or committed. |
 | `--pgn N` | standard-only: restrict output to these PGNs. Decimal or `0x` hex, repeatable, comma-separated. |
 | `--source-address SA` | standard-only: the placeholder source address identifiers are built from. Default `0xFE`, the J1939 null address. |
 | `--version STR` | the `VERSION` string written into the file. |
@@ -532,6 +598,11 @@ placeholder source address.
   such caveat.
 - **Scale, offset and unit are never inferred**, only ever taken from the
   standard. An inferred 16-bit field is a raw count with no unit.
+- **`community` sources can be wrong in ways this tool cannot detect.** canboat
+  marks many of its own NMEA 2000 definitions incomplete, and those are passed
+  through with that caveat in the message comment. opendbc describes particular
+  cars and may not match yours. Neither is checked against your bus unless you
+  give it a recording.
 
 </details>
 
@@ -573,7 +644,7 @@ placeholder source address.
 
 ```bash
 pip install -e ".[dev]"
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q      # 128 tests
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q      # 153 tests
 dbcgen fetch-standard                           # the standard-coverage split
 dbcgen generate -o /tmp/standard.dbc            # 100 messages, 612 signals
 python -m benchmarks.run                        # the results table
@@ -600,10 +671,11 @@ that make each one cheap or expensive are already made.
   order, mapping those names onto them is a proposal worth making — emitted as
   `proposed`, never promoted to `standard`. This is the highest-value piece of
   work left, because it is what would put real names on truck buses.
-- **A licensed Digital Annex overlay.** For anyone who holds a licence, the
-  layouts they paid for should slot in as a `standard` source. Designed as a
-  gitignored local file, never vendored, so the repository stays clean of
-  licensed material.
+- **Read a Digital Annex spreadsheet directly.** `--standard-file` takes a
+  `.dbc` today, so a licence-holder must convert their annex first. Reading the
+  spreadsheet would remove that step, but its column layout is licensed and
+  varies by revision, so it needs a real specimen to build against rather than
+  guesswork.
 - **Transport-protocol reassembly.** Join TP.CM and TP.DT sessions into virtual
   multi-packet messages, which is the only way software identification (PGN
   65242, routinely over 100 bytes) is ever recovered.

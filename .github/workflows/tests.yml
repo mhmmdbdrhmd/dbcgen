@@ -52,6 +52,16 @@ jobs:
           python -m dbcgen.cli generate -o /tmp/standard.dbc
           python -c "import cantools, sys; d = cantools.database.load_file('/tmp/standard.dbc'); print(len(d.messages), 'messages'); sys.exit(0 if len(d.messages) > 50 else 1)"
 
+      - name: every catalogued source builds a loadable database
+        # Each is a different upstream format fetched from a different host, and
+        # generate reloads what it writes. A source that stops parsing fails
+        # here rather than the first time a user picks it off the menu.
+        run: |
+          python -m dbcgen.cli sources
+          python -m dbcgen.cli generate --source obd2     -o /tmp/obd2.dbc
+          python -m dbcgen.cli generate --source nmea2000 -o /tmp/nmea.dbc
+          python -m dbcgen.cli generate --source opendbc:acura_ilx_2016_nidec -o /tmp/acura.dbc
+
       - name: the committed diagrams still match their generator
         run: |
           python docs/make_workflow.py

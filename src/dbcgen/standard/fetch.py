@@ -56,8 +56,8 @@ class CacheInfo:
 
 
 def cache_dir() -> Path:
-    """Cache location.  Honours DBC_DECODER_CACHE, then XDG_CACHE_HOME."""
-    env = os.environ.get("DBC_DECODER_CACHE")
+    """Cache location.  Honours DBCGEN_CACHE, then XDG_CACHE_HOME."""
+    env = os.environ.get("DBCGEN_CACHE")
     if env:
         return Path(env)
     base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")

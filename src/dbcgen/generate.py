@@ -35,6 +35,10 @@ class GenerationReport:
     """What the generator did, and on what basis."""
 
     messages: int = 0
+    from_overlay: int = 0
+    """Resolved by a database the operator supplied, which outranks everything."""
+    overlay_signals_dropped: int = 0
+    """Overlay signals that did not fit the frame length actually recorded."""
     from_network_layer: int = 0
     from_standard_layout: int = 0
     named_only: int = 0
@@ -178,6 +182,27 @@ def _standard_signals(
     return sigs, dropped
 
 
+def _fit_overlay(entry, dlc: int, where: str, report) -> List[Signal]:
+    """Overlay signals that fit the frame, recording any that do not.
+
+    A database written for an 8-byte message will not fit a 6-byte frame, and
+    a signal the operator supplied is not something to drop in silence -- they
+    chose that file precisely because they trust it more than inference.
+    """
+    kept, dropped = [], []
+    for sig in entry.signals:
+        if sig.start_bit + sig.length <= dlc * 8:
+            kept.append(sig)
+        else:
+            dropped.append(
+                f"{where}: '{sig.name}' ends at bit {sig.start_bit + sig.length}, "
+                f"past the {dlc}-byte frame actually recorded"
+            )
+    report.dropped_spns.extend(dropped)
+    report.overlay_signals_dropped += len(dropped)
+    return kept
+
+
 class _Namer:
     """Keeps message names unique and deterministic."""
 
@@ -213,6 +238,7 @@ def generate(
     tables,
     meta: Optional[RecordingMeta] = None,
     version: str = "",
+    overlay=None,
 ) -> Tuple[Database, GenerationReport, Dict[int, NodeIdentity]]:
     report = GenerationReport()
     nodes = identify(frameset, tables)
@@ -224,6 +250,34 @@ def generate(
         dlc = max(group.dlc, 1)
 
         if not group.extended:
+            # An 11-bit bus has no PGN to fall back on, but a database the
+            # operator supplied may still name the identifier outright -- which
+            # is the ordinary case for a passenger vehicle.
+            hit = overlay.lookup(group.can_id, False, None) if overlay is not None else None
+            if hit is not None:
+                entry, how = hit
+                signals = _fit_overlay(
+                    entry, dlc, f"0x{group.can_id:03X}", report
+                )
+                msg = Message(
+                    frame_id=group.can_id,
+                    name=namer.unique(entry.name),
+                    length=dlc,
+                    extended=False,
+                    comment=entry.comment,
+                    evidence=from_standard(
+                        f"overlay:{overlay.source}",
+                        f"11-bit id 0x{group.can_id:03X} matched by {how} against "
+                        f"'{overlay.source}', supplied by the operator; "
+                        f"{len(signals)} signal(s) placed from it",
+                    ),
+                )
+                msg.signals = signals
+                report.from_overlay += 1
+                report.signals_standard += len(signals)
+                messages.append(msg)
+                continue
+
             name = namer.unique(f"CAN_{group.can_id:03X}")
             msg = Message(
                 frame_id=group.can_id,
@@ -256,8 +310,22 @@ def generate(
         comment = ""
         evidence = None
 
-        net = network_layer.info_for(jid.pgn)
-        if net is not None:
+        hit = overlay.lookup(group.can_id, True, jid.pgn) if overlay is not None else None
+        if hit is not None:
+            entry, how = hit
+            signals = _fit_overlay(entry, dlc, f"0x{group.can_id:08X}", report)
+            base = entry.name
+            comment = entry.comment
+            evidence = from_standard(
+                f"overlay:{overlay.source}",
+                f"matched by {how} against '{overlay.source}', supplied by the "
+                f"operator; {len(signals)} signal(s) placed from it",
+                pgn=jid.pgn,
+            )
+            report.from_overlay += 1
+            report.signals_standard += len(signals)
+
+        elif (net := network_layer.info_for(jid.pgn)) is not None:
             _, fallback, description = net
             signals = [
                 s for s in network_layer.signals_for(jid.pgn) if s.start_bit + s.length <= dlc * 8
@@ -388,6 +456,10 @@ class StandardOnlyReport:
     """What a recording-free build could and could not place."""
 
     messages: int = 0
+    from_overlay: int = 0
+    """Resolved by a database the operator supplied, which outranks everything."""
+    overlay_signals_dropped: int = 0
+    """Overlay signals that did not fit the frame length actually recorded."""
     from_network_layer: int = 0
     from_standard_layout: int = 0
     signals_standard: int = 0

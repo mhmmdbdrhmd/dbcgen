@@ -24,7 +24,13 @@ NS_ENTRIES = (
 NO_RECEIVER = "Vector__XXX"
 
 #: Order must match the "SignalSource" ENUM written into the file.
-_SOURCE_INDEX = {"standard": 0, "convention": 1, "inferred": 2, "proposed": 3}
+_SOURCE_INDEX = {
+    "standard": 0,
+    "convention": 1,
+    "community": 2,
+    "inferred": 3,
+    "proposed": 4,
+}
 
 #: Written at the top of every generated file.  A DBC gets passed around
 #: without whoever opens it having met the tool that made it.
@@ -41,7 +47,9 @@ HEADER_WARNING = (
     "                  fact about the recording, not proof they are constant.",
     "  Raw_Byte<n>     no structure was inferred; the byte is passed through.",
     "Every signal also carries a CM_ comment with the statistic behind it, and a",
-    "SignalSource attribute (standard / convention / inferred / proposed).",
+    "SignalSource attribute (standard / convention / community / inferred /",
+    "proposed). 'community' means an openly-licensed public database that was",
+    "reverse-engineered rather than published by the protocol's owner.",
     "A signal whose bits never moved during the recording cannot be found at all.",
 )
 
@@ -124,10 +132,23 @@ def dumps(db: Database) -> str:
 
     # --- messages ---------------------------------------------------------
     for msg in messages:
-        senders = " ".join(msg.senders) if msg.senders else NO_RECEIVER
-        out.append(f"BO_ {msg.dbc_id} {msg.name}: {msg.length} {senders}")
+        # A BO_ line names exactly ONE transmitter.  Space-joining several
+        # produces a file that cantools and every other reader rejects, so any
+        # extra transmitters go in the BO_TX_BU_ section further down, which is
+        # what that section is for.
+        transmitter = msg.senders[0] if msg.senders else NO_RECEIVER
+        out.append(f"BO_ {msg.dbc_id} {msg.name}: {msg.length} {transmitter}")
         for sig in msg.sorted_signals():
             out.append(_signal_line(sig))
+        out.append("")
+
+    # --- additional transmitters -----------------------------------------
+    # Only for the messages that have more than one; the single-transmitter
+    # case is already stated on the BO_ line and repeating it here is noise.
+    for msg in messages:
+        if len(msg.senders) > 1:
+            out.append(f"BO_TX_BU_ {msg.dbc_id} : {','.join(msg.senders)};")
+    if any(len(m.senders) > 1 for m in messages):
         out.append("")
 
     # --- comments ---------------------------------------------------------
@@ -153,7 +174,7 @@ def dumps(db: Database) -> str:
     out.append('BA_DEF_ SG_  "SPN" INT 0 524287;')
     out.append(
         'BA_DEF_ SG_  "SignalSource" ENUM  '
-        '"standard","convention","inferred","proposed";'
+        '"standard","convention","community","inferred","proposed";'
     )
     out.append('BA_DEF_  "BusType" STRING ;')
     out.append('BA_DEF_  "ProtocolType" STRING ;')
