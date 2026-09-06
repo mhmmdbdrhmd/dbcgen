@@ -6,7 +6,7 @@
 <img alt="Python" src="https://img.shields.io/badge/Python-3.10%20%E2%86%92%203.13-3776AB?style=flat-square&logo=python&logoColor=white">
 <img alt="standards" src="https://img.shields.io/badge/standards-ISO%2011783%20%2B%20J1939-2DD4BF?style=flat-square">
 <img alt="output" src="https://img.shields.io/badge/output-Vector%20DBC-6E40C9?style=flat-square">
-<img alt="tests count" src="https://img.shields.io/badge/tests-125%20passing-3FB950?style=flat-square">
+<img alt="tests count" src="https://img.shields.io/badge/tests-128%20passing-3FB950?style=flat-square">
 <img alt="license" src="https://img.shields.io/badge/license-MIT-3FB950?style=flat-square">
 </p>
 
@@ -573,7 +573,7 @@ placeholder source address.
 
 ```bash
 pip install -e ".[dev]"
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q      # 125 tests
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q      # 128 tests
 dbcgen fetch-standard                           # the standard-coverage split
 dbcgen generate -o /tmp/standard.dbc            # 100 messages, 612 signals
 python -m benchmarks.run                        # the results table

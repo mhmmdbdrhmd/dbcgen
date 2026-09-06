@@ -58,6 +58,10 @@ jobs:
           git diff --exit-code -- docs/figures
 
   benchmark:
+    # Runs after standard-only rather than beside it: both need the same export,
+    # and two concurrent requests are what the server refused.  By this point
+    # the cache is warm, so this job normally makes no network request at all.
+    needs: standard-only
     # The measured numbers in the README come from here, against public
     # reference DBCs. A drop in accuracy fails the build rather than sitting
     # unnoticed in a table.

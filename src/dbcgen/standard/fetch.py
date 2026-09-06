@@ -87,6 +87,15 @@ def read_cache_info(directory: Optional[Path] = None) -> Optional[CacheInfo]:
     )
 
 
+def _body_hint(payload: bytes) -> str:
+    """Describe a non-archive response, so a failure is diagnosable from the
+    error alone rather than from server logs nobody has."""
+    if not payload:
+        return ""
+    head = payload[:80].decode("utf-8", "replace").replace("\n", " ").strip()
+    return f" -- last response was {len(payload)} bytes beginning {head!r}"
+
+
 def _validate(payload: bytes) -> None:
     """Refuse anything that is not the archive we expect.
 
@@ -130,18 +139,23 @@ def fetch(directory: Optional[Path] = None, timeout: int = 120) -> CacheInfo:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 payload = resp.read()
                 last_modified = resp.headers.get("Last-Modified", "")
+            # Validation is inside the loop on purpose.  The server answers a
+            # request it will not serve with 200 and an HTML page rather than an
+            # HTTP error, so "downloaded successfully" and "downloaded the
+            # export" are different things, and only the second may stop the
+            # retries.  Validating after the loop is what made a concurrent
+            # request fail in one second with no retry at all.
+            _validate(payload)
             break
-        except Exception as exc:  # network, TLS, HTTP -- retried, then fatal
+        except Exception as exc:  # network, TLS, HTTP, or a non-archive body
             last_error = exc
             if attempt + 1 < FETCH_ATTEMPTS:
                 time.sleep(FETCH_BACKOFF_S * (attempt + 1))
     else:
         raise StandardDataError(
             f"could not fetch {EXPORT_URL} after {FETCH_ATTEMPTS} attempts: "
-            f"{last_error}"
+            f"{last_error}{_body_hint(payload)}"
         ) from last_error
-
-    _validate(payload)
 
     archive = directory / EXPORT_NAME
     tmp = archive.with_suffix(".zip.part")
