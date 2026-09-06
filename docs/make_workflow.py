@@ -191,7 +191,7 @@ def workflow(t) -> str:
         ly += 56
 
     o.append(arrow(322, 121, gx - 8, 150, t, colour=a["standard"], marker="head-std"))
-    o.append(arrow(322, 290, gx - 8, 348, t, colour=a["hardware"], dash=True,
+    o.append(arrow(322, 285, gx - 8, 264, t, colour=a["hardware"], dash=True,
                    marker="head-hw"))
 
     # --- stage 3: the database -------------------------------------------
