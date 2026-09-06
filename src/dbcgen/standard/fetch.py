@@ -109,18 +109,37 @@ def _validate(payload: bytes) -> None:
         )
 
 
+#: One transient failure reaching isobus.net should not end a run: it is a
+#: single free server and the file is small, so a couple of spaced retries cost
+#: nothing and remove the commonest reason a first run fails.
+FETCH_ATTEMPTS = 3
+FETCH_BACKOFF_S = 2.0
+
+
 def fetch(directory: Optional[Path] = None, timeout: int = 120) -> CacheInfo:
     """Download the export and replace the cached copy."""
     directory = directory or cache_dir()
     directory.mkdir(parents=True, exist_ok=True)
 
     req = urllib.request.Request(EXPORT_URL, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            payload = resp.read()
-            last_modified = resp.headers.get("Last-Modified", "")
-    except Exception as exc:  # network, TLS, HTTP -- all equally fatal here
-        raise StandardDataError(f"could not fetch {EXPORT_URL}: {exc}") from exc
+    last_error: Optional[Exception] = None
+    payload = b""
+    last_modified = ""
+    for attempt in range(FETCH_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                payload = resp.read()
+                last_modified = resp.headers.get("Last-Modified", "")
+            break
+        except Exception as exc:  # network, TLS, HTTP -- retried, then fatal
+            last_error = exc
+            if attempt + 1 < FETCH_ATTEMPTS:
+                time.sleep(FETCH_BACKOFF_S * (attempt + 1))
+    else:
+        raise StandardDataError(
+            f"could not fetch {EXPORT_URL} after {FETCH_ATTEMPTS} attempts: "
+            f"{last_error}"
+        ) from last_error
 
     _validate(payload)
 

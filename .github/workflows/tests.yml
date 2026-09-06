@@ -25,6 +25,26 @@ jobs:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: pytest -q
 
+  # The standard-only build and the diagram check are network- and
+  # version-independent, so they run once rather than once per interpreter.
+  # isobus.net is a single free server: four jobs re-downloading the same
+  # 323 KB on every push is both fragile and rude, and it is what made the
+  # first run fail.
+  standard-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+
+      - name: cache the published parameter export
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/dbcgen
+          key: isobus-export-v1
+
       - name: a database builds from the standard alone, with no recording
         # The primary mode. It must not quietly start depending on a recording.
         run: |
@@ -33,7 +53,6 @@ jobs:
           python -c "import cantools, sys; d = cantools.database.load_file('/tmp/standard.dbc'); print(len(d.messages), 'messages'); sys.exit(0 if len(d.messages) > 50 else 1)"
 
       - name: the committed diagrams still match their generator
-        if: matrix.python-version == '3.12'
         run: |
           python docs/make_workflow.py
           git diff --exit-code -- docs/figures
@@ -49,6 +68,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      - name: cache the published parameter export
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/dbcgen
+          key: isobus-export-v1
       - name: fetch the published parameter database
         run: python -m dbcgen.cli fetch-standard
       - name: score against public reference DBCs
