@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dbcgen"
+version = "0.1.0"
+description = "Generate Vector DBC files from published CAN standards, refined by recorded traffic"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["cantools>=39"]
+
+[project.optional-dependencies]
+readers = ["python-can>=4.3", "asammdf>=7.4"]
+dev = ["pytest>=7", "python-can>=4.3", "asammdf>=7.4", "matplotlib>=3.7"]
+
+[project.scripts]
+dbcgen = "dbcgen.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-p no:cacheprovider"

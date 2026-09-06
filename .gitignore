@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# Cached copy of the isobus.net export. Fetched, never vendored.
+/cache/
+/src/dbcgen/standard/_cache/
+
+# Licensed SAE J1939 Digital Annex. Must never be committed.
+*J1939DA*
+*j1939da*
+/private/
+
+# Recordings and derived artefacts kept out by default: recordings are
+# routinely client data. Add specific fixtures deliberately, never by wildcard.
+/benchmarks/data/
+*.MF4
+*.mf4
+*.blf
+*.asc
+*.trc
+*.zip
+out/
+*.out.dbc
