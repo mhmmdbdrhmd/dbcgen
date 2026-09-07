@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import sys
 from typing import List, Optional
 
@@ -14,6 +15,7 @@ from .j1939.ids import decompose, pgn_name_hint
 from .sources import open_recording
 from .standard import fetch as standard_fetch
 from .standard import isobus, tables as identity_tables
+from .standard import annex as annex_mod
 from .standard import overlay as overlay_mod
 from .standard import registry
 
@@ -159,6 +161,37 @@ def _parse_pgns(values) -> list:
     return out
 
 
+#: Extensions that mean "this is a parameter table", not "this is a database".
+_ANNEX_SUFFIXES = annex_mod.SPREADSHEET_SUFFIXES + annex_mod.TEXT_SUFFIXES
+
+
+def _load_supplement(path: str, sheet=None):
+    """Read whatever the operator supplied, and say which kind it was.
+
+    A `.dbc` is a finished database and is applied per message. A spreadsheet
+    or exported table is a parameter catalogue -- a Digital Annex -- and is
+    merged into the standard layer, so every group it lays out stops being a
+    guess for the whole pipeline rather than only where identifiers match.
+    """
+    suffix = pathlib.Path(path).suffix.lower()
+    if suffix in _ANNEX_SUFFIXES:
+        return "annex", annex_mod.load(path, sheet=sheet)
+    return "overlay", overlay_mod.load(path)
+
+
+def _apply_annex(std, supplied):
+    merged, stats = annex_mod.merge(std, supplied)
+    print(f"annex   : {supplied.source}")
+    print(f"          {stats['laid_out']} parameter group(s) gained a layout the "
+          f"free registry does not publish")
+    if stats["added"]:
+        print(f"          {stats['added']} group(s) the free registry never mentions")
+    if stats["already_known"]:
+        print(f"          {stats['already_known']} already laid out by the free "
+              f"registry, left as they were")
+    return merged
+
+
 def cmd_sources(args: argparse.Namespace) -> int:
     """List the standards that can be built without the user finding anything."""
     if args.list:
@@ -228,9 +261,14 @@ def cmd_generate(args: argparse.Namespace) -> int:
     std = isobus.load(info)
     tbl = identity_tables.load(info)
 
-    overlay = overlay_mod.load(args.standard_file) if args.standard_file else None
-    if overlay is not None:
-        print(f"overlay: {len(overlay)} message(s) from {args.standard_file}")
+    overlay = None
+    if args.standard_file:
+        kind, supplied = _load_supplement(args.standard_file, args.sheet)
+        if kind == "annex":
+            std = _apply_annex(std, supplied)
+        else:
+            overlay = supplied
+            print(f"overlay : {len(overlay)} message(s) from {args.standard_file}")
 
     db, report, nodes = generate(
         fs, std, tbl, meta=meta, version=args.version, overlay=overlay
@@ -319,6 +357,18 @@ def _generate_standard_only(args: argparse.Namespace) -> int:
     """Build a DBC with no recording at all, from the standard by itself."""
     info = standard_fetch.ensure(refresh=args.refresh_standard)
     std = isobus.load(info)
+    if args.standard_file:
+        kind, supplied = _load_supplement(args.standard_file, args.sheet)
+        if kind != "annex":
+            print(
+                f"{args.standard_file} is a database, not a parameter table. With "
+                f"no recording there are no identifiers to match it against, so "
+                f"pass a recording as well, or supply a Digital Annex "
+                f"({', '.join(_ANNEX_SUFFIXES)}) instead.",
+                file=sys.stderr,
+            )
+            return 2
+        std = _apply_annex(std, supplied)
 
     db, report = generate_from_standard(
         std,
@@ -473,9 +523,18 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument(
         "--standard-file",
         metavar="PATH",
-        help="a DBC you already own -- a licensed Digital Annex converted to DBC, "
-        "or any database you trust -- used as the authoritative layer ahead of "
-        "inference. Read where it lies; never copied, cached or committed.",
+        help="a parameter catalogue or database you already own. A licensed "
+        "J1939 Digital Annex (.xlsx/.xlsm) or an export of one (.csv/.tsv) is "
+        "merged into the standard layer, giving real names and layouts to the "
+        "~2,764 groups the free registry only names. A .dbc is applied per "
+        "message instead. Read where it lies; never copied, cached or committed.",
+    )
+    gen.add_argument(
+        "--sheet",
+        default=None,
+        metavar="NAME",
+        help="which worksheet of a supplied annex holds the PGN/SPN table "
+        "(default: whichever one does)",
     )
     gen.add_argument(
         "--pgn",

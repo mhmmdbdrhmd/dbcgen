@@ -6,7 +6,7 @@
 <img alt="Python" src="https://img.shields.io/badge/Python-3.10%20%E2%86%92%203.13-3776AB?style=flat-square&logo=python&logoColor=white">
 <img alt="standards" src="https://img.shields.io/badge/standards-ISO%2011783%20%2B%20J1939-2DD4BF?style=flat-square">
 <img alt="output" src="https://img.shields.io/badge/output-Vector%20DBC-6E40C9?style=flat-square">
-<img alt="tests count" src="https://img.shields.io/badge/tests-153%20passing-3FB950?style=flat-square">
+<img alt="tests count" src="https://img.shields.io/badge/tests-166%20passing-3FB950?style=flat-square">
 <img alt="license" src="https://img.shields.io/badge/license-MIT-3FB950?style=flat-square">
 </p>
 
@@ -279,23 +279,54 @@ a licence.
 
 ### 4.1 Using a manual you own
 
-Most of SAE J1939 is sold, not published. If you hold the Digital Annex, or a
-commercial DBC built from it, that file outranks everything this tool would
-otherwise guess:
+Most of SAE J1939 is sold, not published: the free registry names about 2,764
+parameter groups and gives the bit layout of none of them. If you have licensed
+the **Digital Annex**, you already own those layouts — and `dbcgen` reads the
+spreadsheet directly. This is the difference it makes on a truck bus:
 
 ```bash
-dbcgen generate recording.csv --standard-file ~/private/j1939da.dbc -o bus.dbc
+$ dbcgen generate truck.csv -o bus.dbc                       # free registry only
+ SG_ Guess_0_4   : 0|4@1+  (1,0) ""
+ SG_ Guess_8_8   : 8|8@1+  (1,0) ""
+ SG_ Guess_24_16 : 24|16@1+ (1,0) ""
+
+$ dbcgen generate truck.csv --standard-file ~/private/j1939da.xlsx -o bus.dbc
+ SG_ EngineTorqueMode                : 0|4@1+  (1,0) ""
+ SG_ DriverSDemandEnginePercentTorque: 8|8@1+  (1,-125) "%"
+ SG_ EngineSpeed                     : 24|16@1+ (0.125,0) "rpm"
 ```
 
-It is read where it lies — never copied into the cache, never written beside
-the output, never committed. Matching is by full identifier first and parameter
-group second, so a database written for source address `0x00` still resolves an
-ECU that claimed `0x17`. Anything in it that does not fit the frames you
-actually recorded is reported, not dropped in silence.
+Inference had the boundaries right all along; what it could not do was name
+them. Note this applies by **parameter group**, so one annex resolves EEC1 from
+every ECU on the bus at once, and it works with no recording too
+(`dbcgen generate --standard-file annex.xlsx -o out.dbc`).
 
-Only `.dbc` is accepted. A Digital Annex arrives as a spreadsheet whose column
-layout is licensed material and varies by revision; reading it by guesswork
-would misplace signals silently, so convert it first.
+| you pass | treated as | applied |
+|---|---|---|
+| `.xlsx` `.xlsm` | a J1939 Digital Annex | merged into the standard layer, by parameter group |
+| `.csv` `.tsv` | an export of one | same |
+| `.dbc` | a finished database | per message, by identifier then parameter group |
+
+Spreadsheets need `pip install 'dbcgen[annex]'`.
+
+**Columns are found by name, not by position**, because the annex is revised
+yearly and its column order is not a stable interface. Every column is located
+by matching its header against a list of spellings with case and punctuation
+normalised away; a title block above the table is skipped, and the right
+worksheet is found among several. If a column cannot be located the error names
+the headers that *were* found — a parser that guesses at a licensed spreadsheet
+does not produce an error, it produces signals in the wrong place.
+
+There is no annex in this repository and none of its tests uses one. The
+evidence that the sniffing works is that it reproduces the dedicated ISOBUS
+parser **exactly** — 1,269 laid-out parameters, zero mismatches — on the free
+export, which is the same kind of table with known-correct answers.
+
+Whatever you supply is read where it lies: never copied into the cache, never
+written beside the output, never committed. The free registry stays
+authoritative where it publishes a layout, so an annex only ever *adds*.
+Anything that does not fit the frames you actually recorded is reported, not
+dropped in silence.
 
 ### 4.2 The ISOBUS export in detail
 
@@ -498,7 +529,8 @@ build from the standard alone.
 | flag | effect |
 |---|---|
 | `--source NAME` | which catalogued standard to build from — `isobus` (default), `nmea2000`, `obd2`, `opendbc:<platform>`. Everything but `isobus` builds from that database alone and reads no recording. |
-| `--standard-file PATH` | a `.dbc` you already own, used as the authoritative layer ahead of inference. Read where it lies; never copied, cached or committed. |
+| `--standard-file PATH` | a licensed J1939 Digital Annex (`.xlsx`/`.xlsm`), an export of one (`.csv`/`.tsv`), or a `.dbc` you own. Placed ahead of inference. Read where it lies; never copied, cached or committed. |
+| `--sheet NAME` | which worksheet of a supplied annex holds the table (default: whichever one does). |
 | `--pgn N` | standard-only: restrict output to these PGNs. Decimal or `0x` hex, repeatable, comma-separated. |
 | `--source-address SA` | standard-only: the placeholder source address identifiers are built from. Default `0xFE`, the J1939 null address. |
 | `--version STR` | the `VERSION` string written into the file. |
@@ -644,7 +676,7 @@ placeholder source address.
 
 ```bash
 pip install -e ".[dev]"
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q      # 153 tests
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q      # 166 tests
 dbcgen fetch-standard                           # the standard-coverage split
 dbcgen generate -o /tmp/standard.dbc            # 100 messages, 612 signals
 python -m benchmarks.run                        # the results table
@@ -671,11 +703,11 @@ that make each one cheap or expensive are already made.
   order, mapping those names onto them is a proposal worth making — emitted as
   `proposed`, never promoted to `standard`. This is the highest-value piece of
   work left, because it is what would put real names on truck buses.
-- **Read a Digital Annex spreadsheet directly.** `--standard-file` takes a
-  `.dbc` today, so a licence-holder must convert their annex first. Reading the
-  spreadsheet would remove that step, but its column layout is licensed and
-  varies by revision, so it needs a real specimen to build against rather than
-  guesswork.
+- **Verify the annex reader against a real Digital Annex.** It is built and
+  tested against tables of the same shape, and it refuses rather than guesses
+  when a column is missing, but no licensed specimen has been through it. If
+  you hold one and a column spelling is not recognised, the error names the
+  headers it found; that list is the fix.
 - **Transport-protocol reassembly.** Join TP.CM and TP.DT sessions into virtual
   multi-packet messages, which is the only way software identification (PGN
   65242, routinely over 100 bytes) is ever recovered.

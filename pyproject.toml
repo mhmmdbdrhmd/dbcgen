@@ -13,7 +13,8 @@ dependencies = ["cantools>=39"]
 
 [project.optional-dependencies]
 readers = ["python-can>=4.3", "asammdf>=7.4"]
-dev = ["pytest>=7", "python-can>=4.3", "asammdf>=7.4", "matplotlib>=3.7"]
+annex = ["openpyxl>=3.1"]
+dev = ["pytest>=7", "python-can>=4.3", "asammdf>=7.4", "matplotlib>=3.7", "openpyxl>=3.1"]
 
 [project.scripts]
 dbcgen = "dbcgen.cli:main"
